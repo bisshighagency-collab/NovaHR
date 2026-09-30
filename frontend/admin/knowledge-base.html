@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Knowledge Base — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html" class="active">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2>AI Assistant Knowledge Base</h2>
+    <p class="muted">Each entry the AI assistant can draw on to answer employee questions. Mark an entry
+      "Onboarding" to include it in the new-hire guided walkthrough, or "Candidate FAQ" to show it in the
+      job candidates' dashboard.</p>
+    <div id="alert-box"></div>
+
+    <div class="card">
+      <h3 id="form-title">Add Topic</h3>
+      <form id="kb-form">
+        <input type="hidden" id="k-original-key" />
+        <div class="grid cols-2">
+          <div><label>Topic key (unique, no spaces)</label><input type="text" id="k-key" required pattern="[a-z0-9_]+" /></div>
+          <div><label>Title</label><input type="text" id="k-title" required /></div>
+        </div>
+        <label>Content (the AI's answer)</label>
+        <textarea id="k-content" required></textarea>
+        <label>Tags (comma-separated keywords that help the AI match questions)</label>
+        <input type="text" id="k-tags" />
+        <label class="flex" style="margin-top:14px;"><input type="checkbox" id="k-onboarding" style="width:auto;" /> Include in new-hire onboarding walkthrough</label>
+        <label class="flex" style="margin-top:8px;"><input type="checkbox" id="k-candidate-faq" style="width:auto;" /> Show in candidate dashboard FAQ</label>
+        <div class="spacer"></div>
+        <button class="btn" type="submit">Save Topic</button>
+        <button class="btn secondary" type="button" id="cancel-edit" style="display:none;">Cancel Edit</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Topics</h3>
+      <table>
+        <thead><tr><th>Title</th><th>Tags</th><th>Onboarding</th><th>Candidate FAQ</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+    const alertBox = document.getElementById('alert-box');
+    let entries = [];
+
+    function resetForm() {
+      document.getElementById('kb-form').reset();
+      document.getElementById('k-original-key').value = '';
+      document.getElementById('k-key').disabled = false;
+      document.getElementById('form-title').textContent = 'Add Topic';
+      document.getElementById('cancel-edit').style.display = 'none';
+    }
+
+    async function load() {
+      const { entries: e } = await Api.get('/ai/knowledge-base');
+      entries = e;
+      const rows = document.getElementById('rows');
+      if (!e.length) { rows.innerHTML = '<tr><td colspan="5" class="muted">No topics yet.</td></tr>'; return; }
+      rows.innerHTML = e.map((t) => `
+        <tr>
+          <td>${esc(t.title)}</td>
+          <td class="muted">${esc(t.tags) || '—'}</td>
+          <td>${t.is_onboarding ? '✅' : ''}</td>
+          <td>${t.visible_to_candidates ? '✅' : ''}</td>
+          <td>
+            <button class="btn small secondary" data-edit="${esc(t.topic_key)}">Edit</button>
+            <button class="btn small danger" data-del="${t.id}">Delete</button>
+          </td>
+        </tr>`).join('');
+
+      rows.querySelectorAll('button[data-edit]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const t = entries.find((x) => x.topic_key === btn.dataset.edit);
+          document.getElementById('k-original-key').value = t.topic_key;
+          document.getElementById('k-key').value = t.topic_key;
+          document.getElementById('k-key').disabled = true;
+          document.getElementById('k-title').value = t.title;
+          document.getElementById('k-content').value = t.content;
+          document.getElementById('k-tags').value = t.tags || '';
+          document.getElementById('k-onboarding').checked = !!Number(t.is_onboarding);
+          document.getElementById('k-candidate-faq').checked = !!Number(t.visible_to_candidates);
+          document.getElementById('form-title').textContent = 'Edit Topic';
+          document.getElementById('cancel-edit').style.display = '';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      });
+      rows.querySelectorAll('button[data-del]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this knowledge-base topic?')) return;
+          try { await Api.del(`/ai/knowledge-base/${btn.dataset.del}`); await load(); }
+          catch (err) { showAlert(alertBox, err.message); }
+        });
+      });
+    }
+
+    document.getElementById('cancel-edit').addEventListener('click', resetForm);
+
+    document.getElementById('kb-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await Api.post('/ai/knowledge-base', {
+          topic_key: document.getElementById('k-key').value.trim(),
+          title: document.getElementById('k-title').value.trim(),
+          content: document.getElementById('k-content').value.trim(),
+          tags: document.getElementById('k-tags').value.trim(),
+          is_onboarding: document.getElementById('k-onboarding').checked,
+          visible_to_candidates: document.getElementById('k-candidate-faq').checked,
+        });
+        resetForm();
+        showAlert(alertBox, 'Topic saved.', 'success');
+        await load();
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    load().catch((err) => showAlert(alertBox, err.message));
+  </script>
+</body>
+</html>

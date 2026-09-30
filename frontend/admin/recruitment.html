@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recruitment — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html" class="active">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2>Recruitment</h2>
+    <p class="muted">Job openings are internal: they are shown to employees in their account. Employees apply
+      through the Candidate Portal with their employee credentials and take the AI interview; you review them here.
+      Every decision you make is sent to the employee as a notification.</p>
+    <div id="alert-box"></div>
+
+    <div class="card">
+      <h3>Post an Internal Job Opening</h3>
+      <form id="job-form">
+        <div class="grid cols-2">
+          <div><label>Title</label><input type="text" id="j-title" required /></div>
+          <div><label>Department</label><select id="j-department"><option value="">— none —</option></select></div>
+        </div>
+        <label>Description</label>
+        <textarea id="j-description" required></textarea>
+        <label>Requirements</label>
+        <textarea id="j-requirements"></textarea>
+
+        <label>AI interview questions (one per line; optionally add <code>| expected keywords, comma separated</code>)</label>
+        <textarea id="j-questions" placeholder="Tell us about a project where you used HTML, CSS, and JavaScript. | html, css, javascript
+How do you call a REST API from the browser? | fetch, api, json"></textarea>
+        <div class="spacer"></div>
+        <button class="btn" type="submit">Post Job Opening</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Job Postings</h3>
+      <table>
+        <thead><tr><th>Title</th><th>Department</th><th>Status</th><th>Applicants</th><th></th></tr></thead>
+        <tbody id="job-rows"><tr><td colspan="5" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card" id="candidates-card" style="display:none;">
+      <div class="section-title"><h3 id="candidates-title">Applicants</h3></div>
+      <table>
+        <thead><tr><th>Employee</th><th>Department / Position</th><th>Motivation</th><th>Status</th><th>Interview Score</th><th>Actions</th></tr></thead>
+        <tbody id="candidate-rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+    const alertBox = document.getElementById('alert-box');
+
+    async function loadDepartments() {
+      const { departments } = await Api.get('/departments');
+      const sel = document.getElementById('j-department');
+      departments.forEach((d) => sel.insertAdjacentHTML('beforeend', `<option value="${d.id}">${esc(d.name)}</option>`));
+    }
+
+    async function loadJobs() {
+      const rows = document.getElementById('job-rows');
+      const { jobs } = await Api.get('/jobs/admin');
+      if (!jobs.length) { rows.innerHTML = '<tr><td colspan="5" class="muted">No job postings yet.</td></tr>'; return; }
+      rows.innerHTML = jobs.map((j) => `
+        <tr>
+          <td>${esc(j.title)}</td>
+          <td>${esc(j.department_name) || '—'}</td>
+          <td>${badge(j.status)}</td>
+          <td>${j.candidate_count}</td>
+          <td>
+            <button class="btn small secondary" data-view="${j.id}" data-title="${esc(j.title)}">View Applicants</button>
+            ${j.status === 'open' ? `<button class="btn small danger" data-close="${j.id}">Close</button>` : ''}
+          </td>
+        </tr>`).join('');
+
+      rows.querySelectorAll('button[data-view]').forEach((btn) => {
+        btn.addEventListener('click', () => loadCandidates(btn.dataset.view, btn.dataset.title));
+      });
+      rows.querySelectorAll('button[data-close]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try { await Api.patch(`/jobs/${btn.dataset.close}/close`, {}); await loadJobs(); }
+          catch (err) { showAlert(alertBox, err.message); }
+        });
+      });
+    }
+
+    async function loadCandidates(jobId, title) {
+      const card = document.getElementById('candidates-card');
+      const rows = document.getElementById('candidate-rows');
+      document.getElementById('candidates-title').textContent = `Applicants — ${title}`;
+      card.style.display = '';
+      rows.innerHTML = '<tr><td colspan="6" class="muted">Loading&hellip;</td></tr>';
+
+      const [{ candidates }, { sessions }] = await Promise.all([
+        Api.get(`/candidates?job_posting_id=${jobId}`),
+        Api.get(`/interview/job/${jobId}`),
+      ]);
+      const scoreByCandidate = Object.fromEntries(sessions.map((s) => [s.candidate_id, s]));
+
+      if (!candidates.length) { rows.innerHTML = '<tr><td colspan="6" class="muted">No applications yet.</td></tr>'; return; }
+      rows.innerHTML = candidates.map((c) => {
+        const session = scoreByCandidate[c.id];
+        const scoreText = session && session.score !== null ? `${session.score}/100` : (session ? 'In progress' : 'Not started');
+        return `
+          <tr>
+            <td><strong>${esc(c.name)}</strong><br><span class="muted">${esc(c.email)}</span></td>
+            <td>${esc(c.department_name) || '—'}<br><span class="muted">${esc(c.position) || ''}</span></td>
+            <td>${esc(c.motivation) || '<span class="muted">—</span>'}</td>
+            <td>${badge(c.application_status)}</td>
+            <td>${esc(scoreText)}</td>
+            <td>
+              <button class="btn small success" data-act="shortlisted" data-id="${c.id}" data-job="${jobId}" data-title="${esc(title)}">Shortlist</button>
+              <button class="btn small danger" data-act="rejected" data-id="${c.id}" data-job="${jobId}" data-title="${esc(title)}">Reject</button>
+              <button class="btn small secondary" data-act="hired" data-id="${c.id}" data-job="${jobId}" data-title="${esc(title)}">Hire</button>
+            </td>
+          </tr>`;
+      }).join('');
+
+      rows.querySelectorAll('button[data-act]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try {
+            await Api.patch(`/candidates/${btn.dataset.id}/status`, { status: btn.dataset.act });
+            await loadCandidates(btn.dataset.job, btn.dataset.title);
+            await loadJobs();
+          } catch (err) { showAlert(alertBox, err.message); }
+        });
+      });
+    }
+
+    document.getElementById('job-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const lines = document.getElementById('j-questions').value.split('\n').map((l) => l.trim()).filter(Boolean);
+      const questions = lines.map((line) => {
+        const [text, keywords] = line.split('|').map((s) => s && s.trim());
+        return { text, keywords: keywords || '' };
+      });
+      try {
+        await Api.post('/jobs', {
+          title: document.getElementById('j-title').value.trim(),
+          description: document.getElementById('j-description').value.trim(),
+          requirements: document.getElementById('j-requirements').value.trim() || null,
+          department_id: document.getElementById('j-department').value || null,
+          questions,
+        });
+        e.target.reset();
+        showAlert(alertBox, 'Job posting created.', 'success');
+        await loadJobs();
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    (async () => {
+      try { await Promise.all([loadDepartments(), loadJobs()]); }
+      catch (err) { showAlert(alertBox, err.message); }
+    })();
+  </script>
+</body>
+</html>

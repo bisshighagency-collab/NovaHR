@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Payslips — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="attendance-history.html">Attendance</a>
+        <a href="payslips.html" class="active">Payslips</a>
+        <a href="job-openings.html">Job Openings</a>
+        <a href="profile.html">Profile</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2>My Payslips</h2>
+    <div id="alert-box"></div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Period</th><th>Base Salary</th><th>Deductions</th><th>Bonuses</th><th>Net Salary</th><th>Days Present</th><th>Status</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="7" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('employee', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    (async () => {
+      const rows = document.getElementById('rows');
+      try {
+        const { payroll } = await Api.get('/payroll/mine');
+        if (!payroll.length) { rows.innerHTML = '<tr><td colspan="7" class="muted">No payslips yet.</td></tr>'; return; }
+        rows.innerHTML = payroll.map((p) => `
+          <tr>
+            <td>${p.period_month}</td>
+            <td>${fmtMoney(p.base_salary)}</td>
+            <td>${fmtMoney(p.deductions)}</td>
+            <td>${fmtMoney(p.bonuses)}</td>
+            <td><strong>${fmtMoney(p.net_salary)}</strong></td>
+            <td>${p.days_present}</td>
+            <td>${badge(p.status)}</td>
+          </tr>`).join('');
+      } catch (err) {
+        showAlert(document.getElementById('alert-box'), err.message);
+      }
+    })();
+  </script>
+  <script src="../js/ai-widget.js"></script>
+</body>
+</html>

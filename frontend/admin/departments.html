@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Departments — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html" class="active">Departments</a>
+
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2>Departments</h2>
+    <div id="alert-box"></div>
+
+    <div class="card">
+      <h3>Add Department</h3>
+      <form id="d-form" class="grid cols-2">
+        <div><label>Name</label><input type="text" id="d-name" required /></div>
+        <div><label>Description</label><input type="text" id="d-description" /></div>
+        <div style="grid-column:1/-1;"><button class="btn" type="submit">Add Department</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>Name</th><th>Description</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="2" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+    const alertBox = document.getElementById('alert-box');
+
+    async function load() {
+      const { departments } = await Api.get('/departments');
+      const rows = document.getElementById('rows');
+      rows.innerHTML = departments.length
+        ? departments.map((d) => `<tr><td>${esc(d.name)}</td><td class="muted">${esc(d.description) || '—'}</td></tr>`).join('')
+        : '<tr><td colspan="2" class="muted">No departments yet.</td></tr>';
+    }
+
+    document.getElementById('d-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await Api.post('/departments', {
+          name: document.getElementById('d-name').value.trim(),
+          description: document.getElementById('d-description').value.trim() || null,
+        });
+        e.target.reset();
+        await load();
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    load().catch((err) => showAlert(alertBox, err.message));
+  </script>
+</body>
+</html>

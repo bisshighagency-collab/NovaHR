@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Dashboard — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span></a>
+      <nav class="nav-links">
+        <a href="dashboard.html" class="active">Dashboard</a>
+        <a href="attendance-history.html">Attendance</a>
+        <a href="payslips.html">Payslips</a>
+        <a href="job-openings.html">Job Openings</a>
+        <a href="profile.html">Profile</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2 id="welcome">Welcome</h2>
+    <div id="alert-box"></div>
+
+    <section class="clock-hero" id="clock-hero" aria-live="polite">
+      <svg class="analog" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="face" cx="100" cy="100" r="94"/>
+        <g id="ticks"></g>
+        <line class="hand h" id="hand-h" x1="100" y1="100" x2="100" y2="52"/>
+        <line class="hand m" id="hand-m" x1="100" y1="100" x2="100" y2="30"/>
+        <line class="hand s" id="hand-s" x1="100" y1="116" x2="100" y2="22"/>
+        <circle class="pin" cx="100" cy="100" r="6"/>
+      </svg>
+      <div class="clock-info">
+        <div class="clock-greet" id="clock-greet">Hello</div>
+        <div class="clock-digital" id="clock-digital">--:--<small>--</small></div>
+        <div class="clock-date" id="clock-date"></div>
+        <span class="shift-chip"><span class="dot"></span><span id="shift-label">Loading schedule&hellip;</span></span>
+        <p class="shift-note"><span class="shift-countdown" id="shift-countdown"></span> <span id="shift-hours"></span></p>
+        <div class="day-track" id="day-track"><div class="now" id="day-now"></div></div>
+        <div class="day-labels" id="day-labels"></div>
+      </div>
+    </section>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>My Attendance</h3>
+        <div class="sheet-note"><span class="ic">📝</span><div>Attendance is taken on the <strong>paper sign-in sheet</strong>
+          at the reception. If you were absent or arrived late, justify that day here so no salary deduction is made.</div></div>
+        <p id="attendance-summary" class="muted" style="margin:12px 0;">Loading&hellip;</p>
+        <div class="flex">
+          <a class="btn" href="attendance-history.html">Justify an absence or late arrival</a>
+          <a class="btn secondary" href="payslips.html">My payslips</a>
+        </div>
+        <p class="muted" style="margin-top:12px;">Need help? Click the chat bubble in the corner to ask the AI assistant, or type
+          "onboarding" if you're new here.</p>
+      </div>
+
+      <div class="card">
+        <h3>Company Announcements</h3>
+        <div id="announcements">Loading&hellip;</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>New Internal Job Openings</h3><a href="job-openings.html">See all &amp; how to apply &rarr;</a></div>
+      <div id="job-openings">Loading&hellip;</div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('employee', '../login.html');
+    document.getElementById('welcome').textContent = `Welcome, ${Auth.getUser()?.name || 'Employee'}`;
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    const alertBox = document.getElementById('alert-box');
+    const firstName = (Auth.getUser()?.name || '').split(' ').slice(-1)[0];
+
+    // ---- Dashboard clock: shows the time and whether it is service time or break time.
+    // The schedule is set by the admin for each employee; attendance itself is signed on
+    // the paper sheet, so there is nothing to click here. ----
+    const hero = document.getElementById('clock-hero');
+    let schedule = null;
+    let serverOffsetMs = 0;
+
+    (function drawTicks() {
+      const g = document.getElementById('ticks');
+      let out = '';
+      for (let i = 0; i < 60; i++) {
+        const a = (i * 6) * Math.PI / 180, hour = i % 5 === 0;
+        const r1 = hour ? 80 : 85, r2 = 90;
+        out += `<line class="tick${hour ? ' hour' : ''}" x1="${100 + r1 * Math.sin(a)}" y1="${100 - r1 * Math.cos(a)}" x2="${100 + r2 * Math.sin(a)}" y2="${100 - r2 * Math.cos(a)}"/>`;
+        if (hour) {
+          const n = i / 5 || 12, rn = 68;
+          out += `<text class="num" x="${100 + rn * Math.sin(a)}" y="${100 - rn * Math.cos(a)}">${n}</text>`;
+        }
+      }
+      g.innerHTML = out;
+    })();
+
+    const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+    const hhmm = (t) => t.slice(0, 5);
+    function spanText(mins) {
+      const h = Math.floor(mins / 60), m = mins % 60;
+      return h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
+    }
+
+    async function loadSchedule() {
+      schedule = await Api.get('/attendance/schedule');
+      serverOffsetMs = new Date(schedule.server_time.replace(' ', 'T')).getTime() - Date.now();
+      const s = toMin(schedule.work_start_time), e = toMin(schedule.work_end_time);
+      const bs = toMin(schedule.break_start_time), be = toMin(schedule.break_end_time);
+      const pct = (m) => ((m - s) / (e - s)) * 100;
+      document.getElementById('day-track').insertAdjacentHTML('afterbegin',
+        `<div class="seg service" style="left:0;width:${pct(bs)}%"></div>` +
+        `<div class="seg break" style="left:${pct(bs)}%;width:${pct(be) - pct(bs)}%"></div>` +
+        `<div class="seg service" style="left:${pct(be)}%;width:${100 - pct(be)}%"></div>`);
+      document.getElementById('day-labels').innerHTML =
+        `<span style="left:0">${hhmm(schedule.work_start_time)}</span>` +
+        `<span style="left:${(pct(bs) + pct(be)) / 2}%">Break ${hhmm(schedule.break_start_time)}–${hhmm(schedule.break_end_time)}</span>` +
+        `<span style="left:100%">${hhmm(schedule.work_end_time)}</span>`;
+      document.getElementById('shift-hours').textContent =
+        `· Service ${hhmm(schedule.work_start_time)}–${hhmm(schedule.work_end_time)}, break ${hhmm(schedule.break_start_time)}–${hhmm(schedule.break_end_time)} (set by your admin)`;
+    }
+
+    function tick() {
+      const now = new Date(Date.now() + serverOffsetMs);
+      const h = now.getHours(), m = now.getMinutes(), sec = now.getSeconds();
+      document.getElementById('hand-h').style.transform = `rotate(${(h % 12) * 30 + m * 0.5}deg)`;
+      document.getElementById('hand-m').style.transform = `rotate(${m * 6 + sec * 0.1}deg)`;
+      document.getElementById('hand-s').style.transform = `rotate(${sec * 6}deg)`;
+      document.getElementById('clock-digital').innerHTML =
+        `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}<small>${String(sec).padStart(2, '0')}</small>`;
+      document.getElementById('clock-date').textContent =
+        now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      document.getElementById('clock-greet').textContent =
+        `${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'}${firstName ? ', ' + firstName : ''}`;
+      if (!schedule) return;
+
+      const cur = h * 60 + m;
+      const s = toMin(schedule.work_start_time), e = toMin(schedule.work_end_time);
+      const bs = toMin(schedule.break_start_time), be = toMin(schedule.break_end_time);
+      const weekend = now.getDay() === 0 || now.getDay() === 6;
+      let state, label, countdown;
+      if (weekend) {
+        state = 'off'; label = 'Weekend'; countdown = 'No service today.';
+      } else if (cur < s) {
+        state = 'off'; label = 'Before service'; countdown = `Service starts in ${spanText(s - cur)}`;
+      } else if (cur < bs) {
+        state = 'service'; label = 'Service time'; countdown = `Break in ${spanText(bs - cur)}`;
+      } else if (cur < be) {
+        state = 'break'; label = 'Break time'; countdown = `Service resumes in ${spanText(be - cur)}`;
+      } else if (cur < e) {
+        state = 'service'; label = 'Service time'; countdown = `Service ends in ${spanText(e - cur)}`;
+      } else {
+        state = 'off'; label = 'Off duty'; countdown = 'Service is over for today.';
+      }
+      hero.className = `clock-hero is-${state}`;
+      document.getElementById('shift-label').textContent = label;
+      document.getElementById('shift-countdown').textContent = countdown;
+      const pos = Math.min(100, Math.max(0, ((cur + sec / 60 - s) / (e - s)) * 100));
+      document.getElementById('day-now').style.left = `${pos}%`;
+    }
+
+    async function loadAttendanceSummary() {
+      const el = document.getElementById('attendance-summary');
+      try {
+        const { history } = await Api.get('/attendance/history');
+        const toJustify = history.filter((r) => (r.status === 'late' || r.status === 'absent')
+          && (!r.justification_status || r.justification_status === 'none' || r.justification_status === 'rejected'));
+        const pending = history.filter((r) => r.justification_status === 'pending').length;
+        el.innerHTML = toJustify.length
+          ? `You have <strong>${toJustify.length}</strong> late or absent day(s) recorded that you have not justified yet.`
+          : 'No unjustified late or absent days. Keep it up!';
+        if (pending) el.innerHTML += ` <strong>${pending}</strong> justification(s) waiting for the admin.`;
+      } catch (err) {
+        el.textContent = 'Could not load your attendance.';
+      }
+    }
+
+    // ---- Company announcements ----
+    async function loadAnnouncements() {
+      const box = document.getElementById('announcements');
+      try {
+        const { announcements } = await Api.get('/announcements');
+        if (!announcements.length) { box.innerHTML = '<p class="muted">No announcements yet.</p>'; return; }
+        const lastSeen = Number(localStorage.getItem('novahr_announcements_seen') || 0);
+        let newest = lastSeen;
+        box.innerHTML = announcements.slice(0, 5).map((a) => {
+          const ts = new Date(a.created_at.replace(' ', 'T')).getTime();
+          if (ts > newest) newest = ts;
+          return `<div class="announcement${ts > lastSeen ? ' is-new' : ''}">
+            <div class="a-title">${esc(a.title)}</div>
+            <div class="a-meta">${esc(a.created_by_name) || 'Admin'} &middot; ${fmtDate(a.created_at)}</div>
+            <div class="a-body">${esc(a.body)}</div>
+          </div>`;
+        }).join('');
+        localStorage.setItem('novahr_announcements_seen', String(newest));
+      } catch (err) {
+        box.innerHTML = '<p class="muted">Could not load announcements.</p>';
+      }
+    }
+
+    // ---- Internal job openings (announced here; applying needs a candidate session) ----
+    async function loadJobOpenings() {
+      const box = document.getElementById('job-openings');
+      try {
+        const [{ jobs }, { unread }] = await Promise.all([Api.get('/jobs'), Api.get('/notifications')]);
+        const note = unread
+          ? `<p class="muted" style="margin-top:8px;">You have <strong>${unread}</strong> new update(s) on your applications &mdash; <a href="job-openings.html">view them</a>.</p>`
+          : '';
+        if (!jobs.length) { box.innerHTML = '<p class="muted">No internal job openings right now.</p>' + note; return; }
+        box.innerHTML = jobs.slice(0, 3).map((j) => `
+          <div class="announcement">
+            <div class="a-title">${esc(j.title)}</div>
+            <div class="a-meta">${esc(j.department_name) || 'INTERLINK'} &middot; posted ${fmtDate(j.created_at)}</div>
+            <div class="a-body">${esc((j.description || '').slice(0, 140))}${(j.description || '').length > 140 ? '…' : ''}</div>
+          </div>`).join('') +
+          '<p class="muted" style="margin-top:8px;">To apply, log out and sign in to the Candidate Portal with your employee email and password.</p>' + note;
+      } catch (err) {
+        box.innerHTML = '<p class="muted">Could not load job openings.</p>';
+      }
+    }
+
+    tick();
+    setInterval(tick, 1000);
+    (async () => {
+      try { await loadSchedule(); tick(); } catch (err) { showAlert(alertBox, err.message); }
+      await Promise.all([loadAttendanceSummary(), loadAnnouncements(), loadJobOpenings()]);
+    })();
+  </script>
+  <script src="../js/ai-widget.js"></script>
+</body>
+</html>

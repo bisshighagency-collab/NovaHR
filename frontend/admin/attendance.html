@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attendance — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html">Employees</a>
+        <a href="attendance.html" class="active">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <div class="section-title">
+      <h2>Attendance Records</h2>
+      <div class="flex">
+        <label style="margin:0;">Period</label>
+        <input type="month" id="period" />
+      </div>
+    </div>
+    <div id="alert-box"></div>
+
+    <div class="card">
+      <h3>Record from the Sign-in Sheet</h3>
+      <p class="muted">Employees sign the paper attendance sheet every day. Copy only the exceptions here: late
+        arrivals and absences. A day with nothing recorded counts as present. Recording the same employee and date
+        again corrects it.</p>
+      <form id="record-form" class="grid cols-3">
+        <div><label>Employee</label><select id="r-employee" required></select></div>
+        <div><label>Date</label><input type="date" id="r-date" required /></div>
+        <div><label>Recorded as</label><select id="r-status"><option value="late">Late arrival</option><option value="absent">Absent</option><option value="present">Present (correction)</option></select></div>
+        <div><label>Arrival time (late only)</label><input type="time" id="r-arrival" /></div>
+        <div style="align-self:end;"><button class="btn" type="submit">Save to attendance</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Late &amp; Absent Days</h3>
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Employee</th><th>Date</th><th>Recorded as</th><th>Arrival</th><th>Justification</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    const periodInput = document.getElementById('period');
+    periodInput.value = new Date().toISOString().slice(0, 7);
+    const alertBox = document.getElementById('alert-box');
+
+    function justificationCell(r) {
+      if (r.justification_status === 'none' || !r.justification_status) return '<span class="muted">—</span>';
+      const reason = `<div style="font-size:12.5px;max-width:220px;">${esc(r.justification_text)}</div>`;
+      const fileLink = r.justification_file
+        ? `<div><a class="btn small secondary" href="${attachmentUrl('/attendance/' + r.id + '/file')}" target="_blank" rel="noopener">📎 ${esc(r.justification_file_name) || 'View file'}</a></div>`
+        : '';
+      if (r.justification_status === 'pending') {
+        return `${reason}${fileLink}${badge('pending')}<br/>
+          <button class="btn small success" data-decide="approved" data-id="${r.id}">Approve</button>
+          <button class="btn small danger" data-decide="rejected" data-id="${r.id}">Reject</button>`;
+      }
+      return `${reason}${fileLink}${badge(r.justification_status)}`;
+    }
+
+    async function load() {
+      const rows = document.getElementById('rows');
+      rows.innerHTML = '<tr><td colspan="5" class="muted">Loading&hellip;</td></tr>';
+      try {
+        const { records } = await Api.get(`/attendance?period=${periodInput.value}`);
+        const shown = records.filter((r) => r.status === 'late' || r.status === 'absent' || (r.justification_status && r.justification_status !== 'none'));
+        if (!shown.length) { rows.innerHTML = '<tr><td colspan="5" class="muted">No late or absent days recorded for this period.</td></tr>'; return; }
+        rows.innerHTML = shown.map((r) => `
+          <tr>
+            <td>${esc(r.employee_name)}</td>
+            <td>${r.work_date}</td>
+            <td>${badge(r.status)}</td>
+            <td>${r.clock_in ? String(r.clock_in).slice(11, 16) : '—'}</td>
+            <td>${justificationCell(r)}</td>
+          </tr>`).join('');
+
+        rows.querySelectorAll('button[data-decide]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            try {
+              await Api.patch(`/attendance/${btn.dataset.id}/justification`, { decision: btn.dataset.decide });
+              await load();
+            } catch (err) { showAlert(alertBox, err.message); }
+          });
+        });
+      } catch (err) { showAlert(alertBox, err.message); }
+    }
+
+    async function loadEmployees() {
+      const { employees } = await Api.get('/employees');
+      document.getElementById('r-employee').innerHTML = employees
+        .filter((e) => e.status === 'active')
+        .map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
+    }
+
+    const recordDate = document.getElementById('r-date');
+    recordDate.max = new Date().toISOString().slice(0, 10);
+    recordDate.value = recordDate.max;
+    document.getElementById('r-status').addEventListener('change', (e) => {
+      document.getElementById('r-arrival').disabled = e.target.value !== 'late';
+    });
+    document.getElementById('record-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await Api.post('/attendance/record', {
+          employee_id: document.getElementById('r-employee').value,
+          date: recordDate.value,
+          status: document.getElementById('r-status').value,
+          arrival_time: document.getElementById('r-arrival').value || null,
+        });
+        showAlert(alertBox, 'Saved to attendance.', 'success');
+        document.getElementById('r-arrival').value = '';
+        periodInput.value = recordDate.value.slice(0, 7);
+        await load();
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    loadEmployees().catch((err) => showAlert(alertBox, err.message));
+    periodInput.addEventListener('change', load);
+    load();
+  </script>
+</body>
+</html>

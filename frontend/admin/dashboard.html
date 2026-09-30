@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Dashboard — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html" class="active">Dashboard</a>
+        <a href="employees.html">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2 id="welcome">Admin Dashboard</h2>
+    <div id="alert-box"></div>
+    <div class="grid cols-4" id="stats">
+      <div class="stat"><div class="n">&hellip;</div><div class="l">Loading</div></div>
+    </div>
+
+    <div class="spacer"></div>
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="section-title"><h3>Today from the Sign-in Sheet</h3><a href="attendance.html">Record attendance &rarr;</a></div>
+        <p class="muted">Late arrivals and absences you recorded today from the paper sheet.</p>
+        <div id="late-list">Loading&hellip;</div>
+        <div class="section-title" style="margin-top:16px;"><h3>Justifications to Review</h3><span class="muted" id="late-updated"></span></div>
+        <div id="pending-list">Loading&hellip;</div>
+      </div>
+      <div class="card">
+        <h3>Quick Actions</h3>
+        <p><a href="employees.html">Register a new employee &rarr;</a></p>
+        <p><a href="payroll.html">Generate this month's payroll &rarr;</a></p>
+        <p><a href="recruitment.html">Post a job opening &rarr;</a></p>
+        <p><a href="knowledge-base.html">Update the AI knowledge base &rarr;</a></p>
+        <p><a href="announcements.html">Send a company announcement &rarr;</a></p>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+    <div class="card">
+      <h3>About this build</h3>
+      <p class="muted">The AI Assistant and AI Interview features use a transparent, dependency-free
+        keyword-matching engine. so the whole system runs standalone with no external API key.
+        Swap in a real LLM API later without touching any other part of the app. Attendance is signed on the
+        paper sheet: record late and absent days on the Attendance page; each employee's service and break times
+        (shown under their dashboard clock) are set on the Employees page.</p>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('welcome').textContent = `Welcome, ${Auth.getUser()?.name || 'Admin'}`;
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    async function loadStats() {
+      try {
+        const s = await Api.get('/admin/dashboard');
+        document.getElementById('stats').innerHTML = `
+          <div class="stat"><div class="n">${s.active_employees}</div><div class="l">Active Employees</div></div>
+          <div class="stat"><div class="n">${s.present_today}</div><div class="l">Present Today</div></div>
+          <div class="stat"><div class="n">${s.justifications_pending}</div><div class="l">Justifications to Review</div></div>
+          <div class="stat"><div class="n">${s.open_job_postings}</div><div class="l">Open Job Postings</div></div>
+          <div class="stat"><div class="n">${s.candidates_awaiting_review}</div><div class="l">Candidates Awaiting Review</div></div>
+          <div class="stat"><div class="n">${s.shortlisted_candidates}</div><div class="l">Shortlisted Candidates</div></div>
+          <div class="stat"><div class="n">${s.payroll_pending_review}</div><div class="l">Payroll Pending Review</div></div>
+        `;
+      } catch (err) {
+        showAlert(document.getElementById('alert-box'), err.message);
+      }
+    }
+
+    // ---- Today's late/absent days (recorded from the paper sheet) + justifications to review ----
+    async function pollLateToday() {
+      try {
+        const { late, pending_justifications: pending } = await Api.get('/admin/late-today');
+        const listEl = document.getElementById('late-list');
+        listEl.innerHTML = late.length
+          ? late.map((r) => `
+            <div class="flex" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
+              <span>${esc(r.employee_name)}</span>
+              <span>${r.clock_in ? `<span class="muted">arrived ${String(r.clock_in).slice(11, 16)}</span> ` : ''}${badge(r.status)}</span>
+            </div>`).join('')
+          : '<p class="muted">Nothing recorded yet today.</p>';
+        document.getElementById('pending-list').innerHTML = pending.length
+          ? pending.map((r) => `
+            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+              <div class="flex" style="justify-content:space-between;"><strong>${esc(r.employee_name)}</strong><span>${r.work_date} ${badge(r.status)}</span></div>
+              <div class="muted" style="font-size:13px;">${esc(r.justification_text)}</div>
+            </div>`).join('') + '<p style="margin-top:8px;"><a href="attendance.html">Review on the Attendance page &rarr;</a></p>'
+          : '<p class="muted">No justification waiting for review.</p>';
+        document.getElementById('late-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+      } catch (err) { /* silent — don't spam the alert box on a background poll failure */ }
+    }
+
+    (async () => {
+      await loadStats();
+      await pollLateToday();
+      setInterval(loadStats, 20000);
+      setInterval(pollLateToday, 15000);
+    })();
+  </script>
+</body>
+</html>

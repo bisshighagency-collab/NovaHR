@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Employees — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html" class="active">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <div class="section-title"><h2>Employees</h2></div>
+    <div id="alert-box"></div>
+
+    <div class="card">
+      <h3>Register Employee</h3>
+      <p class="muted">Duplicate emails and phone numbers are detected automatically and rejected.</p>
+      <form id="create-form" class="grid cols-3">
+        <div><label>Full name</label><input type="text" id="c-name" required /></div>
+        <div><label>Email</label><input type="email" id="c-email" required /></div>
+        <div><label>Phone</label><input type="tel" id="c-phone" /></div>
+        <div><label>Department</label><select id="c-department"><option value="">— none —</option></select></div>
+        <div><label>Temporary password</label><input type="text" id="c-password" required value="Employee@123" /></div>
+        <div><label>Service starts</label><input type="time" id="c-start" value="08:00" required /></div>
+        <div><label>Service ends</label><input type="time" id="c-end" value="17:00" required /></div>
+        <div><label>Break starts</label><input type="time" id="c-bstart" value="12:00" required /></div>
+        <div><label>Break ends</label><input type="time" id="c-bend" value="13:00" required /></div>
+        <div><label>Base salary (FCFA)</label><input type="number" id="c-salary" min="0" step="1" placeholder="e.g. 150000" /></div>
+        <div><label>Late-coming deduction (FCFA/day)</label><input type="number" id="c-late" min="0" step="1" value="0" /></div>
+        <div><label>Absence deduction (FCFA/day)</label><input type="number" id="c-absence" min="0" step="1" value="0" /></div>
+        <div style="align-self:end;"><button class="btn block" type="submit">Add Employee</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>All Employees</h3>
+      <p class="muted">Every employee has their own salary and deduction rates. Edit the fields below and click the
+        matching Save button for that row.</p>
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Status</th><th>Base Salary</th><th>Late Ded.</th><th>Absence Ded.</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Service &amp; Break Times</h3>
+      <p class="muted">Shown under the clock on each employee's dashboard: <strong>Service time</strong> during service
+        hours and <strong>Break time</strong> during the break. Attendance itself is signed on the paper sheet.</p>
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Employee</th><th>Service starts</th><th>Service ends</th><th>Break starts</th><th>Break ends</th><th></th></tr></thead>
+        <tbody id="schedule-rows"><tr><td colspan="6" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+    const alertBox = document.getElementById('alert-box');
+    let departments = [];
+
+    async function loadDepartments() {
+      const { departments: d } = await Api.get('/departments');
+      departments = d;
+      const sel = document.getElementById('c-department');
+      d.forEach((dep) => sel.insertAdjacentHTML('beforeend', `<option value="${dep.id}">${esc(dep.name)}</option>`));
+    }
+
+    async function loadEmployees() {
+      const rows = document.getElementById('rows');
+      const { employees } = await Api.get('/employees');
+      const schedRows = document.getElementById('schedule-rows');
+      if (!employees.length) {
+        rows.innerHTML = '<tr><td colspan="8" class="muted">No employees yet.</td></tr>';
+        schedRows.innerHTML = '<tr><td colspan="6" class="muted">No employees yet.</td></tr>';
+        return;
+      }
+      const t = (v, d) => (v || d).slice(0, 5);
+      schedRows.innerHTML = employees.map((e) => `
+        <tr data-sched="${e.id}">
+          <td>${esc(e.name)}</td>
+          <td><input type="time" class="s-start" value="${t(e.work_start_time, '08:00:00')}" /></td>
+          <td><input type="time" class="s-end" value="${t(e.work_end_time, '17:00:00')}" /></td>
+          <td><input type="time" class="b-start" value="${t(e.break_start_time, '12:00:00')}" /></td>
+          <td><input type="time" class="b-end" value="${t(e.break_end_time, '13:00:00')}" /></td>
+          <td><button class="btn small" data-act="save-shift" data-id="${e.id}">Save hours</button></td>
+        </tr>`).join('');
+      rows.innerHTML = employees.map((e) => `
+        <tr data-row="${e.id}">
+          <td><a href="employee-profile.html?id=${e.id}">${esc(e.name)}</a></td>
+          <td>${esc(e.email)}</td>
+          <td>${esc(e.department_name) || '—'}</td>
+          <td>${badge(e.status)}</td>
+          <td><input type="number" min="0" step="1" class="pay-salary" style="width:110px;" value="${e.base_salary ?? ''}" placeholder="not set" /></td>
+          <td><input type="number" min="0" step="1" class="pay-late" style="width:90px;" value="${e.late_deduction ?? 0}" /></td>
+          <td><input type="number" min="0" step="1" class="pay-absence" style="width:90px;" value="${e.absence_deduction ?? 0}" /></td>
+          <td>
+            <button class="btn small" data-act="save-pay" data-id="${e.id}">Save Pay</button><br/><br/>
+            ${e.status === 'active'
+              ? `<button class="btn small secondary" data-id="${e.id}" data-status="suspended">Suspend</button>`
+              : `<button class="btn small secondary" data-id="${e.id}" data-status="active">Reactivate</button>`}
+            <button class="btn small danger" data-id="${e.id}" data-status="deleted">Delete</button>
+          </td>
+        </tr>`).join('');
+
+      rows.querySelectorAll('button[data-status]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try {
+            await Api.patch(`/employees/${btn.dataset.id}/status`, { status: btn.dataset.status });
+            await loadEmployees();
+          } catch (err) { showAlert(alertBox, err.message); }
+        });
+      });
+
+      rows.querySelectorAll('button[data-act="save-pay"]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const row = rows.querySelector(`tr[data-row="${btn.dataset.id}"]`);
+          const baseSalary = row.querySelector('.pay-salary').value;
+          if (baseSalary === '') { showAlert(alertBox, 'Enter a base salary before saving.'); return; }
+          try {
+            await Api.put(`/employees/${btn.dataset.id}/compensation`, {
+              base_salary: baseSalary,
+              late_deduction: row.querySelector('.pay-late').value || 0,
+              absence_deduction: row.querySelector('.pay-absence').value || 0,
+            });
+            showAlert(alertBox, 'Pay updated.', 'success');
+          } catch (err) { showAlert(alertBox, err.message); }
+        });
+      });
+
+      schedRows.querySelectorAll('button[data-act="save-shift"]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const row = schedRows.querySelector(`tr[data-sched="${btn.dataset.id}"]`);
+          try {
+            await Api.put(`/employees/${btn.dataset.id}/schedule`, {
+              work_start_time: row.querySelector('.s-start').value,
+              work_end_time: row.querySelector('.s-end').value,
+              break_start_time: row.querySelector('.b-start').value,
+              break_end_time: row.querySelector('.b-end').value,
+            });
+            showAlert(alertBox, 'Service and break times updated.', 'success');
+          } catch (err) { showAlert(alertBox, err.message); }
+        });
+      });
+    }
+
+    document.getElementById('create-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await Api.post('/employees', {
+          name: document.getElementById('c-name').value.trim(),
+          email: document.getElementById('c-email').value.trim(),
+          phone: document.getElementById('c-phone').value.trim() || null,
+          department_id: document.getElementById('c-department').value || null,
+          password: document.getElementById('c-password').value,
+          work_start_time: document.getElementById('c-start').value || null,
+          work_end_time: document.getElementById('c-end').value || null,
+          break_start_time: document.getElementById('c-bstart').value || null,
+          break_end_time: document.getElementById('c-bend').value || null,
+          base_salary: document.getElementById('c-salary').value || null,
+          late_deduction: document.getElementById('c-late').value || 0,
+          absence_deduction: document.getElementById('c-absence').value || 0,
+        });
+        e.target.reset();
+        document.getElementById('c-password').value = 'Employee@123';
+        showAlert(alertBox, 'Employee registered.', 'success');
+        await loadEmployees();
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    (async () => {
+      try { await Promise.all([loadDepartments(), loadEmployees()]); }
+      catch (err) { showAlert(alertBox, err.message); }
+    })();
+  </script>
+</body>
+</html>

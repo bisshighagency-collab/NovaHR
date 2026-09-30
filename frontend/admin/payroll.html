@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payroll — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html" class="active">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <div class="section-title">
+      <h2>Payroll</h2>
+      <div class="flex">
+        <label style="margin:0;">Period</label>
+        <input type="month" id="period" />
+        <button class="btn" id="generate-btn">Generate Payroll for this Period</button>
+      </div>
+    </div>
+    <p class="muted">Each employee has their own base salary and their own late-coming / absence deduction rates,
+      set on the <a href="employees.html">Employees</a> page — there is no standard salary. A day is only deducted
+      if the employee didn't justify it, or the admin hasn't approved their justification yet.</p>
+    <div id="alert-box"></div>
+    <div class="card">
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Employee</th><th>Base</th><th>Late Days</th><th>Absent Days</th><th>Deductions</th><th>Bonuses</th><th>Net</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="9" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    const periodInput = document.getElementById('period');
+    periodInput.value = new Date().toISOString().slice(0, 7);
+    const alertBox = document.getElementById('alert-box');
+
+    function actionsFor(p) {
+      if (p.status === 'pending_review') {
+        return `<button class="btn small success" data-act="approve" data-id="${p.id}">Approve</button>
+                <button class="btn small danger" data-act="reject" data-id="${p.id}">Reject</button>`;
+      }
+      if (p.status === 'approved') {
+        return `<button class="btn small" data-act="disburse" data-id="${p.id}">Disburse</button>`;
+      }
+      if (p.status === 'paid') {
+        return `<span class="muted">Ref: ${esc(p.transaction_ref) || '—'}</span>`;
+      }
+      return '—';
+    }
+
+    async function load() {
+      const rows = document.getElementById('rows');
+      rows.innerHTML = '<tr><td colspan="9" class="muted">Loading&hellip;</td></tr>';
+      try {
+        const { payroll } = await Api.get(`/payroll?period=${periodInput.value}`);
+        if (!payroll.length) { rows.innerHTML = '<tr><td colspan="9" class="muted">No payroll generated for this period yet.</td></tr>'; return; }
+        rows.innerHTML = payroll.map((p) => `
+          <tr>
+            <td>${esc(p.employee_name)}</td>
+            <td>${fmtMoney(p.base_salary)}</td>
+            <td>${p.late_count}</td>
+            <td>${p.absent_count}</td>
+            <td>${fmtMoney(p.deductions)}</td>
+            <td>${fmtMoney(p.bonuses)}</td>
+            <td><strong>${fmtMoney(p.net_salary)}</strong></td>
+            <td>${badge(p.status)}</td>
+            <td>${actionsFor(p)}</td>
+          </tr>`).join('');
+
+        rows.querySelectorAll('button[data-act]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const { act, id } = btn.dataset;
+            try {
+              if (act === 'approve') await Api.patch(`/payroll/${id}/approve`, {});
+              if (act === 'reject') await Api.patch(`/payroll/${id}/reject`, {});
+              if (act === 'disburse') await Api.post(`/payroll/${id}/disburse`, {});
+              await load();
+            } catch (err) { showAlert(alertBox, err.message); }
+          });
+        });
+      } catch (err) { showAlert(alertBox, err.message); }
+    }
+
+    document.getElementById('generate-btn').addEventListener('click', async () => {
+      try {
+        const { skipped } = await Api.post('/payroll/generate', { period: periodInput.value });
+        if (skipped && skipped.length) {
+          showAlert(alertBox, `Payroll generated. Skipped (no base salary set on Employees page): ${skipped.join(', ')}.`, 'info');
+        } else {
+          showAlert(alertBox, 'Payroll generated for all active employees.', 'success');
+        }
+        await load();
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    periodInput.addEventListener('change', load);
+    load();
+  </script>
+</body>
+</html>

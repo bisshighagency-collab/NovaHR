@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Employee Profile — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html" class="active">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+        <a href="announcements.html">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <p><a href="employees.html">&larr; Back to Employees</a></p>
+    <div id="alert-box"></div>
+
+    <div class="card" id="profile-card">Loading&hellip;</div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    const alertBox = document.getElementById('alert-box');
+    const id = new URLSearchParams(location.search).get('id');
+
+    function row(label, value) {
+      return `<div class="flex" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span class="muted">${esc(label)}</span><span>${value}</span>
+      </div>`;
+    }
+
+    (async () => {
+      if (!id) { showAlert(alertBox, 'No employee specified.'); return; }
+      try {
+        const { user: u } = await Api.get(`/employees/${id}`);
+        document.title = `${u.name} — NovaHR Admin`;
+        document.getElementById('profile-card').innerHTML = `
+          <div class="section-title"><h2>${esc(u.name)}</h2>${badge(u.status)}</div>
+          <p class="muted">${esc(u.position) || 'No position on file'} &middot; ${esc(u.department_name) || 'No department'}</p>
+          ${row('Email', esc(u.email))}
+          ${row('Phone', esc(u.phone) || '<span class="muted">not set</span>')}
+          ${row('Position', esc(u.position) || '<span class="muted">not set</span>')}
+          ${row('Work location', esc(u.location) || '<span class="muted">not set</span>')}
+          ${row('Home / mailing address', esc(u.address) || '<span class="muted">not set</span>')}
+          ${row('Department', esc(u.department_name) || '<span class="muted">not set</span>')}
+          ${row('Hire date', esc(u.hire_date) || '<span class="muted">not set</span>')}
+          ${row('Service hours', esc((u.work_start_time || '').slice(0, 5)) + ' – ' + esc((u.work_end_time || '').slice(0, 5)))}
+          ${row('Break time', esc((u.break_start_time || '').slice(0, 5)) + ' – ' + esc((u.break_end_time || '').slice(0, 5)))}
+          ${row('Base salary', u.base_salary !== null ? fmtMoney(u.base_salary) : '<span class="muted">not set</span>')}
+          ${row('Late-coming deduction', fmtMoney(u.late_deduction) + ' / day')}
+          ${row('Absence deduction', fmtMoney(u.absence_deduction) + ' / day')}
+          ${row('Account status', badge(u.status))}
+          <div class="spacer"></div>
+          <a class="btn secondary" href="employees.html">Manage pay &amp; status on the Employees page &rarr;</a>
+        `;
+      } catch (err) {
+        showAlert(alertBox, err.message);
+        document.getElementById('profile-card').innerHTML = '';
+      }
+    })();
+  </script>
+</body>
+</html>

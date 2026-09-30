@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Interview — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="portal.html">Nova<span>HR</span></a>
+      <nav class="nav-links"><a href="portal.html">&larr; Back to Candidate Portal</a></nav>
+    </div>
+  </header>
+
+  <div class="narrow" style="padding-top:24px;">
+    <div class="card">
+      <h2>AI Interview</h2>
+      <p id="job-title" class="muted" style="margin-top:-6px;"></p>
+      <p class="muted">Answer each question as thoroughly as you can. This interview is scored automatically
+        and the results are reviewed by our recruitment team.</p>
+      <div id="alert-box"></div>
+      <div id="interview-body">Loading&hellip;</div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('candidate', 'login.html');
+    const applicationId = Number(new URLSearchParams(location.search).get('application'));
+    if (!applicationId) window.location.href = 'portal.html';
+    const alertBox = document.getElementById('alert-box');
+    const body = document.getElementById('interview-body');
+
+    let session, questions, index = 0;
+
+    function renderQuestion() {
+      if (index >= questions.length) return renderComplete();
+      const q = questions[index];
+      body.innerHTML = `
+        <p class="muted">Question ${index + 1} of ${questions.length}</p>
+        <h3>${esc(q.question_text)}</h3>
+        <textarea id="answer" placeholder="Type your answer here..." required></textarea>
+        <div class="spacer"></div>
+        <button class="btn" id="next-btn">${index === questions.length - 1 ? 'Submit Final Answer' : 'Next Question'}</button>
+      `;
+      document.getElementById('next-btn').addEventListener('click', submitAnswer);
+    }
+
+    async function submitAnswer() {
+      const answer = document.getElementById('answer').value.trim();
+      if (!answer) { showAlert(alertBox, 'Please enter an answer before continuing.'); return; }
+      const q = questions[index];
+      try {
+        await Api.post(`/interview/${session.id}/answer`, {
+          question: q.question_text,
+          answer,
+          expected_keywords: q.expected_keywords,
+        });
+        alertBox.innerHTML = '';
+        index += 1;
+        renderQuestion();
+      } catch (err) { showAlert(alertBox, err.message); }
+    }
+
+    async function renderComplete() {
+      body.innerHTML = '<p class="muted">Scoring your interview&hellip;</p>';
+      try {
+        const { session: finished } = await Api.post(`/interview/${session.id}/complete`, {});
+        body.innerHTML = `
+          <h3>Interview Complete</h3>
+          <p>Thank you for completing the AI interview. Your responses have been recorded and scored:
+            <strong>${finished.score}/100</strong>.</p>
+          <p class="muted">An administrator will review your application. You will get a notification in the Candidate Portal.</p>
+          <a class="btn" href="portal.html">Back to Candidate Portal</a>
+        `;
+      } catch (err) { showAlert(alertBox, err.message); }
+    }
+
+    (async () => {
+      try {
+        const data = await Api.post('/interview/start', { application_id: applicationId });
+        session = data.session;
+        questions = data.questions;
+        document.getElementById('job-title').textContent = `Position: ${data.job_title}`;
+        const transcript = JSON.parse(session.transcript_json || '[]');
+        index = transcript.length; // resume where they left off
+        if (session.status === 'completed') {
+          body.innerHTML = `<p>You already completed this interview. Score: <strong>${session.score}/100</strong>.</p>
+                             <a class="btn" href="portal.html">Back to Candidate Portal</a>`;
+        } else {
+          renderQuestion();
+        }
+      } catch (err) {
+        showAlert(alertBox, err.message);
+        body.innerHTML = '';
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "MySQL (port 3399)",
+      "detail": "Starts NovaHR's own MySQL server. First run creates and seeds the database automatically.",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "${workspaceFolder}\\scripts\\start-mysql.ps1"
+      ],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^never-matches$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "NovaHR database ready on"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "novahr", "clear": true }
+    },
+    {
+      "label": "PHP app (port 8080)",
+      "detail": "Serves the whole app (frontend + backend API) from one PHP built-in server at http://localhost:8080",
+      "type": "process",
+      "command": "C:\\laragon\\bin\\php\\php-8.3.30-Win32-vs16-x64\\php.exe",
+      "args": [
+        "-d", "extension_dir=C:/laragon/bin/php/php-8.3.30-Win32-vs16-x64/ext",
+        "-d", "extension=pdo_mysql",
+        "-d", "extension=mysqli",
+        "-d", "extension=fileinfo",
+        "-S", "localhost:8080",
+        "-t", "frontend",
+        "dev-server-router.php"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "NOVAHR_DB_HOST": "127.0.0.1",
+          "NOVAHR_DB_PORT": "3399",
+          "NOVAHR_DB_USER": "root",
+          "NOVAHR_DB_PASS": ""
+        }
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^never-matches$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Development Server .* started"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "novahr", "clear": true }
+    },
+    {
+      "label": "Start NovaHR",
+      "detail": "Starts MySQL, then the app. Open http://localhost:8080 once both terminals are up.",
+      "dependsOn": ["MySQL (port 3399)", "PHP app (port 8080)"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}

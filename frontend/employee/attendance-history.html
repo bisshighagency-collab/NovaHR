@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Attendance — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="attendance-history.html" class="active">Attendance</a>
+        <a href="payslips.html">Payslips</a>
+        <a href="job-openings.html">Job Openings</a>
+        <a href="profile.html">Profile</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2>My Attendance History</h2>
+    <div id="alert-box"></div>
+
+    <div class="card" id="justify-card">
+      <h3 id="justify-title">Justify an Absence or a Late Arrival</h3>
+      <div class="sheet-note" style="margin-bottom:12px;"><span class="ic">📝</span><div>Attendance is signed on the
+        <strong>paper sheet</strong> at the reception. Days you were late or absent appear below once the admin records
+        them &mdash; or justify any past day yourself with the form. Attach proof if you have it (PDF, JPG, PNG or WEBP,
+        up to 8&nbsp;MB). If the admin approves it, no salary deduction is made for that day.</div></div>
+      <form id="justify-form" class="grid cols-3">
+        <div><label>Date</label><input type="date" id="j-date" required max="" /></div>
+        <div><label>What happened?</label><select id="j-type"><option value="absent">I was absent</option><option value="late">I arrived late</option></select></div>
+        <div><label>Reason</label><input type="text" id="j-reason" placeholder="e.g. Medical emergency, family bereavement…" required /></div>
+        <div style="grid-column: span 2;"><label>Proof document (optional)</label><input type="file" id="j-file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*" /></div>
+        <div style="align-self:end;">
+          <button class="btn" type="submit">Submit Justification</button>
+          <button class="btn secondary" type="button" id="justify-cancel" hidden>Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Recorded as</th><th>Arrival time</th><th>Justification</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="4" class="muted">Loading&hellip;</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('employee', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    const alertBox = document.getElementById('alert-box');
+    const dateInput = document.getElementById('j-date');
+    const cancelBtn = document.getElementById('justify-cancel');
+    dateInput.max = new Date().toISOString().slice(0, 10);
+
+    function prefillJustify(date, type) {
+      dateInput.value = date;
+      if (type) document.getElementById('j-type').value = type;
+      dateInput.readOnly = true;
+      cancelBtn.hidden = false;
+      document.getElementById('justify-title').textContent = `Justify ${date}`;
+      document.getElementById('justify-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('j-reason').focus();
+    }
+    function resetJustifyForm() {
+      document.getElementById('justify-form').reset();
+      dateInput.readOnly = false;
+      cancelBtn.hidden = true;
+      document.getElementById('justify-title').textContent = 'Justify an Absence or a Late Arrival';
+    }
+    cancelBtn.addEventListener('click', resetJustifyForm);
+
+    function justificationCell(h) {
+      const fileLink = h.justification_file
+        ? ` <a class="btn small secondary" href="${attachmentUrl('/attendance/' + h.id + '/file')}" target="_blank" rel="noopener">View file</a>`
+        : '';
+      if (h.status === 'late' || h.status === 'absent') {
+        if (!h.justification_status || h.justification_status === 'none') {
+          return `<button class="btn small secondary" data-justify="${h.work_date}" data-type="${h.status}">Justify</button>`;
+        }
+        if (h.justification_status === 'rejected') {
+          return `${badge('rejected')}${fileLink} <button class="btn small secondary" data-justify="${h.work_date}" data-type="${h.status}">Resubmit</button>`;
+        }
+        return `${badge(h.justification_status)}${fileLink}`;
+      }
+      return '<span class="muted">—</span>';
+    }
+
+    async function load() {
+      const rows = document.getElementById('rows');
+      try {
+        const { history } = await Api.get('/attendance/history');
+        if (!history.length) { rows.innerHTML = '<tr><td colspan="4" class="muted">No late or absent day recorded — you signed the sheet every day.</td></tr>'; return; }
+        rows.innerHTML = history.map((h) => `
+          <tr>
+            <td>${h.work_date}</td>
+            <td>${badge(h.status)}</td>
+            <td>${h.clock_in ? String(h.clock_in).slice(11, 16) : '—'}</td>
+            <td>${justificationCell(h)}</td>
+          </tr>`).join('');
+
+        rows.querySelectorAll('button[data-justify]').forEach((btn) => {
+          btn.addEventListener('click', () => prefillJustify(btn.dataset.justify, btn.dataset.type));
+        });
+      } catch (err) {
+        showAlert(alertBox, err.message);
+      }
+    }
+
+    document.getElementById('justify-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData();
+      formData.set('date', dateInput.value);
+      formData.set('type', document.getElementById('j-type').value);
+      formData.set('reason', document.getElementById('j-reason').value.trim());
+      const file = document.getElementById('j-file').files[0];
+      if (file) formData.set('file', file);
+      try {
+        await Api.postForm('/attendance/justify', formData);
+        resetJustifyForm();
+        showAlert(alertBox, 'Justification submitted for admin review.', 'success');
+        await load();
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    load();
+  </script>
+  <script src="../js/ai-widget.js"></script>
+</body>
+</html>

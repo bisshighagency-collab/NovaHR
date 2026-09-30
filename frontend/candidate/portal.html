@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Candidate Portal — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    .job-item { padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .job-item:last-child { border-bottom: none; }
+    .job-item.highlight { background: var(--accent-soft); margin: 0 -14px; padding: 14px; border-radius: 10px; }
+    .job-item textarea { min-height: 70px; }
+    .app-item { padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .app-item:last-child { border-bottom: none; }
+    .session-note { background: var(--accent-soft); border-radius: 10px; padding: 12px 16px; margin-bottom: 18px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="portal.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">candidate</small></a>
+      <nav class="nav-links">
+        <a href="portal.html" class="active">Candidate Portal</a>
+        <a href="#" id="back-link">Back to employee account</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2 id="welcome">Candidate Portal</h2>
+    <div class="session-note">
+      You are signed in as a <strong>candidate</strong>. This session only covers internal job applications.
+      To see payslips, justify an absence or use the AI assistant, log out and sign in to your
+      <strong>employee account</strong> with the same email and password.
+    </div>
+    <div id="alert-box"></div>
+
+    <div class="card">
+      <div class="section-title"><h3>Notifications <span id="unread-badge"></span></h3>
+        <button class="btn small secondary" id="mark-read-btn" hidden>Mark all as read</button></div>
+      <div id="notifications">Loading&hellip;</div>
+    </div>
+
+    <div class="card">
+      <h3>My Applications</h3>
+      <div id="applications">Loading&hellip;</div>
+    </div>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>Internal Job Openings</h3>
+        <div id="jobs">Loading&hellip;</div>
+      </div>
+      <div class="card">
+        <h3>Frequently Asked Questions</h3>
+        <div id="faq">Loading&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('candidate', 'login.html');
+    const me = Auth.getUser() || {};
+    document.getElementById('welcome').textContent = `Candidate Portal — ${me.name || ''}`;
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = 'login.html'; });
+    document.getElementById('back-link').addEventListener('click', (e) => {
+      e.preventDefault();
+      const email = me.email || '';
+      Auth.clear();
+      window.location.href = '../login.html' + (email ? `?email=${encodeURIComponent(email)}` : '');
+    });
+
+    const alertBox = document.getElementById('alert-box');
+    const applyJobId = new URLSearchParams(location.search).get('apply');
+
+    const statusMessages = {
+      applied: 'Application received. You can now take the AI interview.',
+      interview_scheduled: 'Your AI interview has started — continue where you left off.',
+      interviewed: 'Interview completed and scored. Waiting for an administrator to review it.',
+      shortlisted: 'You have been shortlisted. HR will contact you about the next steps.',
+      rejected: 'Your application was not retained this time.',
+      hired: 'Congratulations — you have been selected for this role!',
+    };
+
+    function scoreFeedback(score) {
+      if (score >= 80) return 'Excellent';
+      if (score >= 60) return 'Good';
+      return 'Reviewed';
+    }
+
+    async function loadNotifications() {
+      const box = document.getElementById('notifications');
+      const markBtn = document.getElementById('mark-read-btn');
+      try {
+        const { notifications, unread } = await Api.get('/notifications');
+        document.getElementById('unread-badge').innerHTML = unread ? `<span class="badge pending">${unread} new</span>` : '';
+        markBtn.hidden = !unread;
+        if (!notifications.length) { box.innerHTML = '<p class="muted">No notifications yet.</p>'; return; }
+        box.innerHTML = notifications.slice(0, 8).map((n) => `
+          <div class="announcement${Number(n.is_read) ? '' : ' is-new'}">
+            <div class="a-title">${esc(n.title)}</div>
+            <div class="a-meta">${fmtDate(n.created_at)}</div>
+            <div class="a-body">${esc(n.body)}</div>
+          </div>`).join('');
+      } catch (err) { box.innerHTML = '<p class="muted">Could not load notifications.</p>'; }
+    }
+
+    document.getElementById('mark-read-btn').addEventListener('click', async () => {
+      try { await Api.post('/notifications/read', {}); await loadNotifications(); }
+      catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    function renderApplication({ application: a, job, interview }) {
+      const done = interview && interview.status === 'completed' && interview.score !== null;
+      const canInterview = ['applied', 'interview_scheduled'].includes(a.application_status) && !done;
+      let scoreHtml = '';
+      if (done) {
+        const transcript = JSON.parse(interview.transcript_json || '[]');
+        scoreHtml = `
+          <p style="margin-top:8px;"><strong>AI interview score: ${Number(interview.score).toFixed(0)} / 100</strong> <span class="badge ${Number(interview.score) >= 60 ? 'active' : 'pending'}">${scoreFeedback(Number(interview.score))}</span></p>
+          ${transcript.length ? `<details><summary class="muted">Per-question breakdown</summary>
+            <div class="table-wrap"><table><thead><tr><th>Question</th><th>Score</th></tr></thead>
+            <tbody>${transcript.map((t) => `<tr><td>${esc(t.question)}</td><td>${Number(t.score).toFixed(0)}</td></tr>`).join('')}</tbody>
+            </table></div></details>` : ''}`;
+      }
+      return `
+        <div class="app-item">
+          <div class="section-title"><strong>${esc(job ? job.title : a.job_title)}</strong>${badge(a.application_status)}</div>
+          <p class="muted" style="margin:4px 0;">Applied ${fmtDate(a.created_at)}</p>
+          <p style="margin:6px 0;">${esc(statusMessages[a.application_status] || '')}</p>
+          ${canInterview ? `<a class="btn small" href="interview.html?application=${a.id}">${a.application_status === 'interview_scheduled' ? 'Continue' : 'Start'} AI Interview</a>` : ''}
+          ${scoreHtml}
+        </div>`;
+    }
+
+    async function loadApplications() {
+      const box = document.getElementById('applications');
+      try {
+        const { applications } = await Api.get('/candidates/me');
+        box.innerHTML = applications.length
+          ? applications.map(renderApplication).join('')
+          : '<p class="muted">You have not applied for any internal job opening yet. Choose one below.</p>';
+      } catch (err) { box.innerHTML = ''; showAlert(alertBox, err.message); }
+    }
+
+    async function loadJobs() {
+      const box = document.getElementById('jobs');
+      try {
+        const { jobs } = await Api.get('/jobs');
+        if (!jobs.length) { box.innerHTML = '<p class="muted">There are no open positions right now.</p>'; return; }
+        box.innerHTML = jobs.map((j) => `
+          <div class="job-item${String(j.id) === applyJobId ? ' highlight' : ''}" id="job-${j.id}">
+            <strong>${esc(j.title)}</strong> ${j.department_name ? `<span class="muted">&middot; ${esc(j.department_name)}</span>` : ''}
+            <p style="margin:6px 0;">${esc(j.description)}</p>
+            ${j.requirements ? `<p class="muted" style="margin:0 0 8px;"><strong>Requirements:</strong> ${esc(j.requirements)}</p>` : ''}
+            ${j.my_application_status
+              ? `<p>${badge('applied')} <span class="muted">You already applied — see My Applications.</span></p>`
+              : `<label for="motivation-${j.id}">Why are you interested? (optional)</label>
+                 <textarea id="motivation-${j.id}" placeholder="A few words for the HR team..."></textarea>
+                 <div class="spacer"></div>
+                 <button class="btn small" data-apply="${j.id}">Apply for this position</button>`}
+          </div>`).join('');
+
+        box.querySelectorAll('button[data-apply]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            try {
+              await Api.post('/candidates/apply', {
+                job_posting_id: Number(btn.dataset.apply),
+                motivation: document.getElementById(`motivation-${btn.dataset.apply}`).value.trim(),
+              });
+              showAlert(alertBox, 'Application sent. You can now start the AI interview from My Applications.', 'success');
+              await Promise.all([loadApplications(), loadJobs(), loadNotifications()]);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (err) { showAlert(alertBox, err.message); btn.disabled = false; }
+          });
+        });
+
+        const target = applyJobId && document.getElementById(`job-${applyJobId}`);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (err) { box.innerHTML = '<p class="muted">Could not load job openings.</p>'; }
+    }
+
+    async function loadFaq() {
+      const box = document.getElementById('faq');
+      try {
+        const { entries } = await Api.get('/candidates/faq');
+        box.innerHTML = entries.length ? entries.map((e) => `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+            <strong>${esc(e.title)}</strong>
+            <p class="muted" style="margin:4px 0 0;">${esc(e.content)}</p>
+          </div>`).join('') : '<p class="muted">No FAQ entries yet.</p>';
+      } catch (err) { box.innerHTML = '<p class="muted">Could not load FAQ.</p>'; }
+    }
+
+    Promise.all([loadNotifications(), loadApplications(), loadJobs(), loadFaq()]);
+    setInterval(loadNotifications, 20000);
+  </script>
+</body>
+</html>

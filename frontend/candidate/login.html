@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Candidate Portal — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="../index.html">Nova<span>HR</span></a>
+      <nav class="nav-links"><a href="../login.html">Employee / Admin login</a></nav>
+    </div>
+  </header>
+
+  <div class="narrow" style="padding-top:50px;">
+    <div class="card">
+      <h2>Candidate Portal</h2>
+      <p class="muted">Internal job openings are for INTERLINK employees only. Sign in here with the
+        <strong>same email and password as your employee account</strong> to apply, take the AI interview
+        and follow your applications.</p>
+      <div id="alert-box"></div>
+      <form id="login-form">
+        <label for="email">Employee email</label>
+        <input type="email" id="email" required autocomplete="username" />
+        <label for="password">Password</label>
+        <input type="password" id="password" required autocomplete="current-password" />
+        <div class="spacer"></div>
+        <button class="btn block" type="submit">Sign in as Candidate</button>
+      </form>
+      <p class="muted" style="margin-top:16px;">Want to go back to your normal work? Sign in on the
+        <a href="../login.html">employee login</a> page with the same credentials.</p>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.get('email')) document.getElementById('email').value = params.get('email');
+    const pendingJob = params.get('job');
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const alertBox = document.getElementById('alert-box');
+      alertBox.innerHTML = '';
+      try {
+        const { token, candidate } = await Api.post('/auth/candidate-login', {
+          email: document.getElementById('email').value.trim(),
+          password: document.getElementById('password').value,
+        });
+        Auth.setSession(token, candidate, 'candidate');
+        window.location.href = pendingJob ? `portal.html?apply=${encodeURIComponent(pendingJob)}` : 'portal.html';
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+  </script>
+</body>
+</html>

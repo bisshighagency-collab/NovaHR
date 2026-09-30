@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Openings — NovaHR</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    .job-item { padding: 16px 0; border-bottom: 1px solid var(--border); }
+    .job-item:last-child { border-bottom: none; }
+    .how-to { background: var(--accent-soft); border-radius: 10px; padding: 14px 18px; margin-bottom: 18px; }
+    .how-to ol { margin: 6px 0 0 18px; padding: 0; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="attendance-history.html">Attendance</a>
+        <a href="payslips.html">Payslips</a>
+        <a href="job-openings.html" class="active">Job Openings</a>
+        <a href="profile.html">Profile</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <h2>Internal Job Openings</h2>
+    <div class="how-to">
+      <strong>How to apply</strong>
+      <ol>
+        <li>Choose an opening below and click <em>Log out &amp; apply as candidate</em>.</li>
+        <li>Sign in to the Candidate Portal with the <strong>same email and password</strong> you use here.</li>
+        <li>Apply, then take the AI interview. You will be notified when your application is reviewed.</li>
+        <li>To return to your normal work, log out of the Candidate Portal and sign in here again.</li>
+      </ol>
+    </div>
+    <div id="alert-box"></div>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>Open Positions</h3>
+        <div id="jobs">Loading&hellip;</div>
+      </div>
+      <div class="card">
+        <h3>My Application Updates <span id="unread-badge"></span></h3>
+        <div id="notifications">Loading&hellip;</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('employee', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    function goApply(jobId) {
+      const email = (Auth.getUser() || {}).email || '';
+      Auth.clear(); // leave the employee session: applying happens in a separate candidate session
+      window.location.href = `../candidate/login.html?job=${encodeURIComponent(jobId)}&email=${encodeURIComponent(email)}`;
+    }
+
+    (async () => {
+      const box = document.getElementById('jobs');
+      try {
+        const { jobs } = await Api.get('/jobs');
+        if (!jobs.length) { box.innerHTML = '<p class="muted">There are no internal job openings right now.</p>'; }
+        else {
+          box.innerHTML = jobs.map((j) => `
+            <div class="job-item">
+              <strong>${esc(j.title)}</strong> ${j.department_name ? `<span class="muted">&middot; ${esc(j.department_name)}</span>` : ''}
+              <p style="margin:6px 0;">${esc(j.description)}</p>
+              ${j.requirements ? `<p class="muted" style="margin:0 0 10px;"><strong>Requirements:</strong> ${esc(j.requirements)}</p>` : ''}
+              <button class="btn small" data-job="${j.id}">Log out &amp; apply as candidate</button>
+            </div>`).join('');
+          box.querySelectorAll('button[data-job]').forEach((b) => b.addEventListener('click', () => goApply(b.dataset.job)));
+        }
+      } catch (err) { box.innerHTML = ''; showAlert(document.getElementById('alert-box'), err.message); }
+
+      const nbox = document.getElementById('notifications');
+      try {
+        const { notifications, unread } = await Api.get('/notifications');
+        document.getElementById('unread-badge').innerHTML = unread ? `<span class="badge pending">${unread} new</span>` : '';
+        nbox.innerHTML = notifications.length ? notifications.slice(0, 6).map((n) => `
+          <div class="announcement${Number(n.is_read) ? '' : ' is-new'}">
+            <div class="a-title">${esc(n.title)}</div>
+            <div class="a-meta">${fmtDate(n.created_at)}</div>
+            <div class="a-body">${esc(n.body)}</div>
+          </div>`).join('') + '<p class="muted" style="margin-top:10px;">Open the Candidate Portal to see full details and interview scores.</p>'
+          : '<p class="muted">No application updates yet.</p>';
+      } catch (err) { nbox.innerHTML = '<p class="muted">Could not load updates.</p>'; }
+    })();
+  </script>
+  <script src="../js/ai-widget.js"></script>
+</body>
+</html>

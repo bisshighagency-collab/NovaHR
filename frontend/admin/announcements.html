@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Announcements — NovaHR Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="dashboard.html">Nova<span>HR</span> <small style="font-size:12px;color:var(--text-muted);">admin</small></a>
+      <nav class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="employees.html">Employees</a>
+        <a href="attendance.html">Attendance</a>
+        <a href="payroll.html">Payroll</a>
+        <a href="recruitment.html">Recruitment</a>
+        <a href="knowledge-base.html">AI Knowledge Base</a>
+        <a href="departments.html">Departments</a>
+        <a href="announcements.html" class="active">Announcements</a>
+        <a href="#" id="logout-link">Log out</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container" style="padding-top:24px;">
+    <div class="section-title"><h2>Announcements</h2></div>
+    <p class="muted">Broadcast company-wide updates and news — every employee sees these on their dashboard.</p>
+    <div id="alert-box"></div>
+
+    <div class="card">
+      <h3>New Announcement</h3>
+      <form id="create-form">
+        <label>Title</label>
+        <input type="text" id="a-title" required maxlength="200" placeholder="e.g. Office closed for public holiday" />
+        <label>Message</label>
+        <textarea id="a-body" required rows="4" placeholder="Details for employees…"></textarea>
+        <div class="spacer"></div>
+        <button class="btn" type="submit">Send to All Employees</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Sent Announcements</h3>
+      <div id="list">Loading&hellip;</div>
+    </div>
+  </div>
+
+  <script src="../js/ui.js"></script>
+  <script src="../js/api.js"></script>
+  <script>
+    Auth.requireRole('admin', '../login.html');
+    document.getElementById('logout-link').addEventListener('click', (e) => { e.preventDefault(); Auth.clear(); window.location.href = '../login.html'; });
+
+    const alertBox = document.getElementById('alert-box');
+
+    function render(announcements) {
+      const list = document.getElementById('list');
+      if (!announcements.length) { list.innerHTML = '<p class="muted">No announcements sent yet.</p>'; return; }
+      list.innerHTML = announcements.map((a) => `
+        <div class="announcement">
+          <div class="a-title">${esc(a.title)}</div>
+          <div class="a-meta">${esc(a.created_by_name) || 'Admin'} &middot; ${fmtDate(a.created_at)}
+            <button class="btn small danger" style="margin-left:10px;" data-id="${a.id}">Delete</button>
+          </div>
+          <div class="a-body">${esc(a.body)}</div>
+        </div>`).join('');
+
+      list.querySelectorAll('button[data-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Delete this announcement for everyone?')) return;
+          try {
+            const { announcements } = await Api.del(`/announcements/${btn.dataset.id}`);
+            render(announcements);
+          } catch (err) { showAlert(alertBox, err.message); }
+        });
+      });
+    }
+
+    async function load() {
+      try {
+        const { announcements } = await Api.get('/announcements');
+        render(announcements);
+      } catch (err) { showAlert(alertBox, err.message); }
+    }
+
+    document.getElementById('create-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const { announcements } = await Api.post('/announcements', {
+          title: document.getElementById('a-title').value.trim(),
+          body: document.getElementById('a-body').value.trim(),
+        });
+        e.target.reset();
+        showAlert(alertBox, 'Announcement sent to all employees.', 'success');
+        render(announcements);
+      } catch (err) { showAlert(alertBox, err.message); }
+    });
+
+    load();
+  </script>
+</body>
+</html>

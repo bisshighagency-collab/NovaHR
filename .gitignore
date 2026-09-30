@@ -1,0 +1,18 @@
+# Uploaded justification files (proof documents) - personal data, never commit
+storage/*
+!storage/.gitkeep
+
+# Local database data (normally in %LOCALAPPDATA%\NovaHR\mysql-data)
+.devdb/
+.novahr-seeded
+mysql-data/
+
+# Environment / secrets
+.env
+*.env
+
+# Logs and OS files
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store
